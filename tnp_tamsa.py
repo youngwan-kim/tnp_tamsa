@@ -24,7 +24,7 @@ parser.add_argument('--bin', '-b'  , dest = 'bins'   , type = str, help='bin num
 parser.add_argument('--data', dest='isData', action='store_true')
 parser.add_argument('--sim', dest='isSim', action='store_true')
 parser.add_argument('--log'        , action='store_true'     , help = 'keep logs')
-parser.add_argument('--njob', '-n' , default=20, type = int, help = 'condor njob per submit')
+parser.add_argument('--njob', '-n' , default="100,20", help = 'condor njob per job submission for each step: "HIST,FIT". Or you can use one number for all steps')
 parser.add_argument('--ijob', '-i' , type = int, help = 'condor job index (for internal use)')
 parser.add_argument('--nmax'       , default=300, type = int, help = 'condor nmax job (concurrency limits)')
 parser.add_argument('--no-condor'  , dest = "condor", action='store_false' )
@@ -43,11 +43,12 @@ args = parser.parse_args()
 ####################################################################
 def check_condor(clusterid,njob):
     os.system("sleep 2")
-    lines=os.popen("condor_history {} -limit {} -scanlimit 20000 -af exitcode out".format(clusterid,njob)).read().splitlines()
+    lines=os.popen("condor_history {} -limit {} -scanlimit 20000 -af exitcode out err".format(clusterid,njob)).read().splitlines()
     for line in lines:
         words=line.split()
         if words[0]!="0":
             print "[tnp_tamsa] Non-zero exit code. Check the log"
+            print words[2]
             print words[1]
             return False
     return True
@@ -93,6 +94,8 @@ if hasattr(tnpConf,'OutputDir'):
 else:
     config.path="/".join([TNP_BASE,"results",os.path.basename(args.settings).split(".",1)[0],args.config])
 
+args.njob=[int(i) for i in args.njob.split(",")]
+
 ####################################################################
 ##### check Bins
 ####################################################################
@@ -119,8 +122,9 @@ if args.checkConfig:
 if "hist" in args.step:
     import histUtils
     hist_configs=config.make_hist_configs()
+    njob=args.njob[0]
     if args.condor==False:
-        histUtils.makePassFailHistograms( hist_configs[args.set], args.njob, args.ijob)
+        histUtils.makePassFailHistograms( hist_configs[args.set], njob, args.ijob)
     elif args.condor==True:
         for iconf in range(len(hist_configs)):
             if args.set!=None and args.set!=iconf: continue
@@ -135,7 +139,7 @@ if "hist" in args.step:
 cd $TNP_BASE
 python tnp_tamsa.py {} {} --step hist --set {} --njob {} --ijob $1 --no-condor
 exit $?
-'''.format(args.settings,args.config,iconf,args.njob)
+'''.format(args.settings,args.config,iconf,njob)
             )
             os.system("chmod +x "+working_dir+'/run.sh')
 
@@ -149,15 +153,15 @@ concurrency_limits = {1}
 jobbatchname = {2}
 getenv = True
 queue {3}
-'''.format(working_dir,"n{}.{}".format(args.nmax,os.getenv("USER")),jobbatchname,args.njob)
+'''.format(working_dir,"n{}.{}".format(args.nmax,os.getenv("USER")),jobbatchname,njob)
             )
 
             clusterid=submit_condor(working_dir+'/condor.jds')
-            print '  Submit', args.njob, 'jobs. Waiting...'
+            print '  Submit', njob, 'jobs. Waiting...'
             os.system('condor_wait '+working_dir+'/condor.log > /dev/null')
-            if not check_condor(clusterid,args.njob):
+            if not check_condor(clusterid,njob):
                 exit(1)
-            outfiles=["{}/job{}.root".format(working_dir,i) for i in range(args.njob)]
+            outfiles=["{}/job{}.root".format(working_dir,i) for i in range(njob)]
             exitcode=os.system('condor_run -a request_cpus=8 -a concurrency_limits=n32.tnphadd hadd -j 8 -f {} {} > /dev/null'.format("/".join([hist_config[0].path,hist_config[0].hist_file]),' '.join(outfiles)))
             if exitcode!=0:
                 print "hadd failed"
@@ -202,7 +206,8 @@ exit $?
                     )
                     os.system("chmod +x "+working_dir+'/run.sh')
                     
-                    condor_arguments=[",".join([str(i) for i in range(len(c.bins)) if i%args.njob==j]) for j in range(args.njob)]
+                    njob=min(args.njob[-1],len(c.bins))
+                    condor_arguments=[",".join([str(i) for i in range(len(c.bins)) if i%njob==j]) for j in range(njob)]
                     open(working_dir+'/condor.jds','w').write(
 '''executable = {0}/run.sh
 arguments = $(Process)
@@ -223,7 +228,7 @@ queue arguments from (
         print '  Waiting...'
         for clusterid in condorlogs:
             os.system('condor_wait '+condorlogs[clusterid]+' > /dev/null')
-            if not check_condor(clusterid,args.njob):
+            if not check_condor(clusterid,njob):
                 exit(1)
 
 ####################################################################

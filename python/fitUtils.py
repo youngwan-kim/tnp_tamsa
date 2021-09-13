@@ -3,6 +3,7 @@ import ctypes
 import ROOT as rt
 
 def calc_eff(valp,valf,errp=None,errf=None):
+    if valp+valf==0: return 0.,0.
     eff=valp/(valp+valf)
     if errp is None and errf is None:
         return eff
@@ -78,7 +79,7 @@ class tnpFitter(object):
             work.factory("SUM::pdfPass(nSigP*sigPass,nBkgP*bkgPass)");
             work.factory("SUM::pdfFail(nSigF*sigFail,nBkgF*bkgFail)");
             
-            if "hsseo" in config.option:
+            if hasattr(config,"option") and "hsseo" in config.option:
                 if config.bins[ibin]['vars']['el_pt']['max']<31:
                     if work.var("sigmaP"):
                         work.var("sigmaP").setConstant()
@@ -112,11 +113,16 @@ class tnpFitter(object):
         text1.SetTextAlign(12)
         if isFit:
             text1.AddText("* fit status pass: {}, fail : {}".format(resultPass.status(),resultFail.status()))
-            ## fit errors should be scaled. See comment on fitTo function.
             fit_valp=work.var("nSigP").getVal()
-            fit_errp=work.var("nSigP").getError()*(histPass.Integral()/histPass.GetEffectiveEntries())**0.5
+            fit_errp=work.var("nSigP").getError()
+            ## fit errors should be scaled. See comment on fitTo function.
+            if histPass.GetEffectiveEntries(): 
+                fit_errp*=(histPass.Integral()/histPass.GetEffectiveEntries())**0.5
             fit_valf=work.var("nSigF").getVal()
-            fit_errf=work.var("nSigF").getError()*(histFail.Integral()/histFail.GetEffectiveEntries())**0.5
+            fit_errf=work.var("nSigF").getError()
+            ## fit errors should be scaled. See comment on fitTo function.
+            if histFail.GetEffectiveEntries(): 
+                fit_errf*=(histFail.Integral()/histFail.GetEffectiveEntries())**0.5
             fit_eff,fit_err=calc_eff(fit_valp,fit_valf,fit_errp,fit_errf)
             text1.AddText("fit_eff[{},{}] = {:.4f} #pm {:.4f}".format(config.fit_range[0],config.fit_range[1],fit_eff,fit_err))
             if hasattr(config,"count_range") and getattr(config,"count_range"):

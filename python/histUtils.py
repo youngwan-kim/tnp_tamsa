@@ -91,13 +91,7 @@ def makePassFailHistograms( configs, njob, ijob ):
         split_events=True
     else:
         split_events=False
-        quotient=len(rootfiles)//njob
-        remainder=len(rootfiles)%njob
-        structure=[quotient+1]*remainder+[quotient]*(njob-remainder)
-        if sum(structure) != len(rootfiles):
-            print "Error: something wrong in rootfile splitting"
-            exit(1)
-        rootfiles=rootfiles[sum(structure[:ijob]):sum(structure[:ijob+1])]
+        rootfiles=[rootfiles[i] for i in range(len(rootfiles)) if i%njob==ijob]
 
     hist_file=configs[0].path+"/"+configs[0].hist_file.replace(".root",".d/job{}.root".format(ijob))
 
@@ -109,59 +103,46 @@ def makePassFailHistograms( configs, njob, ijob ):
     # Prepare hists, cuts and outfile
     #################################
 
-    mkdirp(hist_file)
+    mkdirp(os.path.dirname(hist_file))
     outfile = ROOT.TFile(hist_file,'recreate')
     bins=configs[0].bins
-    bin_cuts=[]
-    hists=[[] for i in range(len(bins))]
-    formulars=[[] for i in range(len(bins))]
-    xs=[[] for i in range(len(bins))]
+    bin_formulars=[None]*len(bins)
+    expr_formulars=[None]*len(configs)
+    hists=[[[] for i in range(len(bins))] for i in range(len(configs))]
+    xs=[[[] for i in range(len(bins))] for i in range(len(configs))]
+    weight_formulars=[[[] for i in range(len(bins))] for i in range(len(configs))]
+    
+    for ib in range(len(bins)):
+        bin_formulars[ib]=ROOT.TTreeFormula('{}_BinCut'.format(bins[ib]['name']), bins[ib]['cut'], tree)
 
-    for config in configs:
+    for ic in range(len(configs)):
+        config=configs[ic]
+        expr_formulars[ic]=ROOT.TTreeFormula('{}_expr'.format(config.hist_prefix), config.expr, tree)
         for ib in range(len(bins)):
-            bin_cuts+=[ROOT.TTreeFormula('{}{}_BinCut'.format(config.hist_prefix,bins[ib]['name']), bins[ib]['cut'], tree)]
-            formular="({})".format(config.expr)
-            if config.weight:
-                formular+="*({})".format(config.weight)
+            for isPass,genmatching,genmass in [[i%2==0,(i//2)%2==1,(i//4)%2==1] for i in range(2**3)]:
+                if not config.genmatching and genmatching: continue
+                if not config.genmass and genmass: continue
+                histname=config.get_histname(ib,isPass=isPass,genmatching=genmatching,genmass=genmass)
+                hists[ic][ib]+=[ROOT.TH1D(histname,bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
 
-            hists[ib]+=[ROOT.TH1D('{}{}_Pass'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-            formulars[ib]+=[ROOT.TTreeFormula('{}{}_Pass_Formula'.format(config.hist_prefix,bins[ib]['name']), "({})*({})".format(formular,config.test), tree)]
-            xs[ib]+=[config.mass]
+                if isPass: 
+                    weight="({})".format(config.test)
+                else:
+                    weight="!({})".format(config.test)
+                if genmatching:
+                    weight+="*({})".format(config.genmatching)
+                if config.weight:
+                    weight+="*({})".format(config.weight)                    
+                weight_formulars[ic][ib]+=[ROOT.TTreeFormula('{}_weight'.format(histname), weight, tree)]
 
-            hists[ib]+=[ROOT.TH1D('{}{}_Fail'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-            formulars[ib]+=[ROOT.TTreeFormula('{}{}_Fail_Formula'.format(config.hist_prefix,bins[ib]['name']), "({})*!({})".format(formular,config.test), tree)]
-            xs[ib]+=[config.mass]
+                if genmass:
+                    xs[ic][ib]+=[config.genmass]
+                else:
+                    xs[ic][ib]+=[config.mass]
 
-            if config.genmatching:
-                hists[ib]+=[ROOT.TH1D('{}{}_Pass_genmatching'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-                formulars[ib]+=[ROOT.TTreeFormula('{}{}_Pass_Formula_genmatching'.format(config.hist_prefix,bins[ib]['name']), "({})*({})*({})".format(formular,config.test,config.genmatching), tree)]
-                xs[ib]+=[config.mass]
-
-                hists[ib]+=[ROOT.TH1D('{}{}_Fail_genmatching'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-                formulars[ib]+=[ROOT.TTreeFormula('{}{}_Fail_Formula_genmatching'.format(config.hist_prefix,bins[ib]['name']), "({})*!({})*({})".format(formular,config.test,config.genmatching), tree)]
-                xs[ib]+=[config.mass]
-
-            if config.genmass:
-                hists[ib]+=[ROOT.TH1D('{}{}_Pass_genmass'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-                formulars[ib]+=[ROOT.TTreeFormula('{}{}_Pass_Formula_genmass'.format(config.hist_prefix,bins[ib]['name']), "({})*({})".format(formular,config.test), tree)]
-                xs[ib]+=[config.genmass]
-
-                hists[ib]+=[ROOT.TH1D('{}{}_Fail_genmass'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-                formulars[ib]+=[ROOT.TTreeFormula('{}{}_Fail_Formula_genmass'.format(config.hist_prefix,bins[ib]['name']), "({})*!({})".format(formular,config.test), tree)]
-                xs[ib]+=[config.genmass]
-
-                if config.genmatching:
-                    hists[ib]+=[ROOT.TH1D('{}{}_Pass_genmatching_genmass'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-                    formulars[ib]+=[ROOT.TTreeFormula('{}{}_Pass_Formula_genmatching_genmass'.format(config.hist_prefix,bins[ib]['name']), "({})*({})*({})".format(formular,config.test,config.genmatching), tree)]
-                    xs[ib]+=[config.genmass]
-
-                    hists[ib]+=[ROOT.TH1D('{}{}_Fail_genmatching_genmass'.format(config.hist_prefix,bins[ib]['name']),bins[ib]['title'],config.hist_nbins,config.hist_range[0],config.hist_range[1])]
-                    formulars[ib]+=[ROOT.TTreeFormula('{}{}_Fail_Formula_genmatching_genmass'.format(config.hist_prefix,bins[ib]['name']), "({})*!({})*({})".format(formular,config.test,config.genmatching), tree)]
-                    xs[ib]+=[config.genmass]
-
-    print len(configs),len(bins),len(hists),len(hists[0])
+    print len(configs),len(bins),len(hists),len(hists[0]),len(hists[0][0])
     notify_list=ROOT.TList()
-    for formular in bin_cuts+[f for ff in formulars for f in ff]:
+    for formular in expr_formulars+bin_formulars+[f for fff in weight_formulars for ff in fff for f in ff]:
         notify_list.Add(formular)
     tree.SetNotify(notify_list)
 
@@ -214,16 +195,22 @@ def makePassFailHistograms( configs, njob, ijob ):
             sys.stdout.flush()
 
         tree.GetEntry(index)
-        for ib in range(len(bins)):
-            if bin_cuts[ib].EvalInstance():
-                for ih in range(len(hists[ib])):
-                    weight = formulars[ib][ih].EvalInstance()
-                    #print weight
-                    if weight:
-                        if math.isnan(weight):
-                            print 'Error: nan weight!!! continue'
-                            continue
-                        hists[ib][ih].Fill(getattr(tree,xs[ib][ih]),weight)
+        for ic in range(len(configs)):
+            expr=expr_formulars[ic].EvalInstance()
+            if not expr: continue
+            for ib in range(len(bins)):
+                bincut=bin_formulars[ib].EvalInstance()
+                if not bincut: continue
+                for ih in range(len(hists[ic][ib])):
+                    weight = weight_formulars[ic][ib][ih].EvalInstance()
+                    if not weight: continue
+                    if math.isnan(weight):
+                        print 'Error: nan weight!!! continue'
+                        continue
+                    if math.isinf(weight):
+                        print 'Error: inf weight!!! continue'
+                        continue
+                    hists[ic][ib][ih].Fill(getattr(tree,xs[ic][ib][ih]),expr*bincut*weight)
                 break
 
     te=time.time()
@@ -231,8 +218,8 @@ def makePassFailHistograms( configs, njob, ijob ):
     #####################
     # Deal with the Hists
     #####################
-    print(len([h for hh in hists for h in hh]))
-    for hist in [h for hh in hists for h in hh]:
+    print(len([h for hhh in hists for hh in hhh for h in hh]))
+    for hist in [h for hhh in hists for hh in hhh for h in hh]:
         dirname=os.path.dirname(hist.GetName())
         basename=os.path.basename(hist.GetName())
         if not outfile.GetDirectory(dirname):
