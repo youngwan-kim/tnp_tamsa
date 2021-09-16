@@ -187,6 +187,10 @@ def makePassFailHistograms( configs, njob, ijob ):
 
     print("Starting event loop to fill histograms..")
 
+    ### FIXME test for migration
+    mighist_pass=ROOT.TH2D("mighist_pass","mighist_pass",20,0,100,20,0,100)
+    mighist_fail=ROOT.TH2D("mighist_fail","mighist_fail",20,0,100,20,0,100)
+    ##################################
     ts=time.time()
     for index in range(startevent,endevent):
         if index >= nevents: break
@@ -198,6 +202,15 @@ def makePassFailHistograms( configs, njob, ijob ):
         for ic in range(len(configs)):
             expr=expr_formulars[ic].EvalInstance()
             if not expr: continue
+            ############################## FIXME mig test
+            if ic==0 and configs[ic].isSim:
+                if tree.pair_mass>50 and tree.pair_mass<150:
+                    print ic,configs[ic].isSim,tree.mc_probe_et,tree.el_et
+                    if tree.passingCutBasedMedium94XV2:
+                        mighist_pass.Fill(tree.mc_probe_et,tree.el_et,tree.totWeight if tree.tag_Ele_q*tree.el_q<0 else -tree.totWeight)
+                    else:
+                        mighist_fail.Fill(tree.mc_probe_et,tree.el_et,tree.totWeight if tree.tag_Ele_q*tree.el_q<0 else -tree.totWeight)
+            ###############################################
             for ib in range(len(bins)):
                 bincut=bin_formulars[ib].EvalInstance()
                 if not bincut: continue
@@ -218,6 +231,10 @@ def makePassFailHistograms( configs, njob, ijob ):
     #####################
     # Deal with the Hists
     #####################
+    ################ FIXME mig test ###################
+    mighist_pass.Write()
+    mighist_fail.Write()
+    ##################################################
     print(len([h for hhh in hists for hh in hhh for h in hh]))
     for hist in [h for hhh in hists for hh in hhh for h in hh]:
         dirname=os.path.dirname(hist.GetName())
