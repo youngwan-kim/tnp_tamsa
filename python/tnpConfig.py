@@ -14,6 +14,7 @@ class tnpConfig(object):
         self.data_genmass=None
         self.name="s0m0"
         self.hist_prefix=""
+        self.option=""
         for key in kwargs:
             setattr(self,key,kwargs[key])
 
