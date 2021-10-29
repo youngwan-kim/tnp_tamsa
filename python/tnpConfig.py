@@ -13,6 +13,7 @@ class tnpConfig(object):
         self.data_genmatching=None
         self.data_genmass=None
         self.name="s0m0"
+        self.title="stat"
         self.hist_prefix=""
         self.option=""
         for key in kwargs:
@@ -120,7 +121,7 @@ class tnpConfig(object):
                         else:
                             binCut   = '%s * (%s >= %f && %s < %f)' % (binCut  ,var,bins1D[ix[iv]],var,bins1D[ix[iv]+1])
                             binTitle = '%s; %1.3f < %s < %1.3f'    % (binTitle,bins1D[ix[iv]],var,bins1D[ix[iv]+1])
-                        binName  = '%s_%s_%1.2fTo%1.2f'  % (binName ,var,bins1D[ix[iv]],bins1D[ix[iv]+1])
+                        binName  = '%s_%s_%1.2fTo%1.2f'  % (binName ,var.replace("/","_"),bins1D[ix[iv]],bins1D[ix[iv]+1])
                         binVars[var] = { 'min': bins1D[ix[iv]], 'max': bins1D[ix[iv]+1]}
 
 
@@ -196,11 +197,11 @@ class tnpConfig(object):
         histname="sim" if self.isSim==True else "data"
         histname+="_"+self.name
         if ndim==1:
-            hist=ROOT.TH1D(histname,"efficiency",len(bins[0])-1,array('f',bins[0]))
+            hist=ROOT.TH1D(histname,self.title,len(bins[0])-1,array('f',bins[0]))
         elif ndim==2:
-            hist=ROOT.TH2D(histname,"efficiency",len(bins[0])-1,array('f',bins[0]),len(bins[1])-1,array('f',bins[1]))
+            hist=ROOT.TH2D(histname,self.title,len(bins[0])-1,array('f',bins[0]),len(bins[1])-1,array('f',bins[1]))
         elif ndim==3:
-            hist=ROOT.TH3D(histname,"efficiency",len(bins[0])-1,array('f',bins[0]),len(bins[1])-1,array('f',bins[1]),len(bins[2])-1,array('f',bins[2]))
+            hist=ROOT.TH3D(histname,self.title,len(bins[0])-1,array('f',bins[0]),len(bins[1])-1,array('f',bins[1]),len(bins[2])-1,array('f',bins[2]))
         hist.SetDirectory(0)
 
         for ibin in range(len(self.bins)):

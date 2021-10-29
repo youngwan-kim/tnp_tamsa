@@ -51,6 +51,11 @@ def check_condor(clusterid,njob):
             print words[2]
             print words[1]
             return False
+        if os.system("grep -q 'Error in' {}".format(words[2]))==0:
+            print "[tnp_tamsa] Error occurs. Check the log"
+            print words[2]
+            print words[1]
+            return False
     return True
 
 def submit_condor(jdspath):
@@ -93,6 +98,9 @@ if hasattr(tnpConf,'OutputDir'):
     config.path=tnpConf.OutputDir+"/"+args.config
 else:
     config.path="/".join([TNP_BASE,"results",os.path.basename(args.settings).split(".",1)[0],args.config])
+os.system("mkdir -p {}".format(config.path))
+with open(config.path+"/config.txt","w") as f:
+    f.write(config.__str__())
 
 args.njob=[int(i) for i in args.njob.split(",")]
 
@@ -162,7 +170,7 @@ queue {3}
             if not check_condor(clusterid,njob):
                 exit(1)
             outfiles=["{}/job{}.root".format(working_dir,i) for i in range(njob)]
-            exitcode=os.system('condor_run -a request_cpus=8 -a concurrency_limits=n32.tnphadd hadd -j 8 -f {} {} > /dev/null'.format("/".join([hist_config[0].path,hist_config[0].hist_file]),' '.join(outfiles)))
+            exitcode=os.system('condor_run -a jobbatchname={} -a request_cpus=8 -a concurrency_limits=n32.tnphadd hadd -j 8 -f {} {} > /dev/null'.format(jobbatchname+"_hadd","/".join([hist_config[0].path,hist_config[0].hist_file]),' '.join(outfiles)))
             if exitcode!=0:
                 print "hadd failed"
                 exit(exitcode)
