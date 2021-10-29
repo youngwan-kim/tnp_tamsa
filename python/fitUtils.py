@@ -36,6 +36,7 @@ class tnpFitter(object):
         rt.RooMsgService.instance().setGlobalKillBelow(rt.RooFit.ERROR)
         
     def run(self,ibin):
+        print "Fit ibin =",ibin
         config=self.config
         method=config.method.split()
         isFit="fit" in method
@@ -129,8 +130,12 @@ class tnpFitter(object):
                 xarg=rt.RooArgSet(x)        
                 x.setRange("fit_range",config.fit_range[0],config.fit_range[1])
                 x.setRange("count_range",config.count_range[0],config.count_range[1])
-                fracPass=work.pdf("sigPass").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("count_range")).getVal()/work.pdf("sigPass").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("fit_range")).getVal()
-                fracFail=work.pdf("sigFail").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("count_range")).getVal()/work.pdf("sigFail").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("fit_range")).getVal()
+                sigPass_count_range=work.pdf("sigPass").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("count_range")).getVal()
+                sigPass_fit_range=work.pdf("sigPass").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("fit_range")).getVal()
+                fracPass=sigPass_count_range/sigPass_fit_range if sigPass_fit_range else 1.
+                sigFail_count_range=work.pdf("sigFail").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("count_range")).getVal()
+                sigFail_fit_range=work.pdf("sigFail").createIntegral(xarg,rt.RooFit.NormSet(xarg),rt.RooFit.Range("fit_range")).getVal()
+                fracFail=sigFail_count_range/sigFail_fit_range if sigFail_fit_range else 1.
                 fit_valp=fit_valp*fracPass
                 fit_errp=fit_errp/math.sqrt(fracPass)
                 fit_valf=fit_valf*fracFail

@@ -26,9 +26,35 @@ def normalizeToEffectiveEntries(h):
         h.Scale(neffective/integral)
     return
 
+def smearNegativeBins(h):
+    for i in range(1,h.GetNbinsX()+1):
+        if h.GetBinContent(i) < 0:
+            remain_content=abs(h.GetBinContent(i))
+            remain_error2=h.GetBinError(i)**2
+            targets=[]
+            for j in range(1,7):
+                if h.GetBinContent(i+j)>0: targets+=[i+j]
+                if h.GetBinContent(i-j)>0: targets+=[i-j]
+                if len(targets): break
+            if len(targets)==0: continue            
+            target_content=sum([h.GetBinContent(k) for k in targets])
+            smear_content=min(target_content,remain_content)
+            smear_error2=remain_error2*smear_content/remain_content
+            smear_weights=[h.GetBinContent(k)/target_content for k in targets]
+            for j in range(len(targets)):
+                k=targets[j]
+                h.SetBinContent(k,h.GetBinContent(k)-smear_content*smear_weights[j])
+                h.SetBinError(k,math.sqrt(h.GetBinError(k)**2+smear_error2*smear_weights[j]))
+            remain_content=remain_content-smear_content
+            remain_error2=remain_error2-smear_error2
+            if remain_error2<0 and abs(remain_error2)<1e-6: remain_error2=0
+            h.SetBinContent(i,-remain_content)
+            h.SetBinError(i,math.sqrt(remain_error2))
+    return
+
 def removeNegativeBins(h):
     for i in range(h.GetNbinsX()+2):
-        if (h.GetBinContent(i) < 0):
+        if h.GetBinContent(i) < 0:
             h.SetBinContent(i,0)
             h.SetBinError(i,0)
     return
@@ -55,6 +81,8 @@ def postProcess(filename):
     outfile=ROOT.TFile(filename,"recreate")
     for hist in hists:
         #normalizeToEffectiveEntries(hist)
+        for i in range(10):
+            smearNegativeBins(hist)
         removeNegativeBins(hist)
         dirname=os.path.dirname(hist.GetName())
         basename=os.path.basename(hist.GetName())
@@ -190,6 +218,8 @@ def makePassFailHistograms( configs, njob, ijob ):
     ### FIXME test for migration
     mighist_pass=ROOT.TH2D("mighist_pass","mighist_pass",20,0,100,20,0,100)
     mighist_fail=ROOT.TH2D("mighist_fail","mighist_fail",20,0,100,20,0,100)
+    mighist_pass_mod=ROOT.TH2D("mighist_pass_mod","mighist_pass_mod",20,0,100,20,0,100)
+    mighist_fail_mod=ROOT.TH2D("mighist_fail_mod","mighist_fail_mod",20,0,100,20,0,100)
     ##################################
     ts=time.time()
     for index in range(startevent,endevent):
@@ -205,11 +235,12 @@ def makePassFailHistograms( configs, njob, ijob ):
             ############################## FIXME mig test
             if ic==0 and configs[ic].isSim:
                 if tree.pair_mass>50 and tree.pair_mass<150:
-                    print ic,configs[ic].isSim,tree.mc_probe_et,tree.el_et
                     if tree.passingCutBasedMedium94XV2:
                         mighist_pass.Fill(tree.mc_probe_et,tree.el_et,tree.totWeight if tree.tag_Ele_q*tree.el_q<0 else -tree.totWeight)
+                        mighist_pass_mod.Fill(tree.mc_probe_et,tree.el_et*(91.18/tree.pair_mass)**2,tree.totWeight if tree.tag_Ele_q*tree.el_q<0 else -tree.totWeight)
                     else:
                         mighist_fail.Fill(tree.mc_probe_et,tree.el_et,tree.totWeight if tree.tag_Ele_q*tree.el_q<0 else -tree.totWeight)
+                        mighist_fail_mod.Fill(tree.mc_probe_et,tree.el_et*(91.18/tree.pair_mass)**2,tree.totWeight if tree.tag_Ele_q*tree.el_q<0 else -tree.totWeight)
             ###############################################
             for ib in range(len(bins)):
                 bincut=bin_formulars[ib].EvalInstance()
@@ -223,6 +254,8 @@ def makePassFailHistograms( configs, njob, ijob ):
                     if math.isinf(weight):
                         print 'Error: inf weight!!! continue'
                         continue
+                    if hasattr(configs[ic],"maxweight") and abs(weight)>configs[ic].maxweight:
+                        weight=math.copysign(configs[ic].maxweight,weight)
                     hists[ic][ib][ih].Fill(getattr(tree,xs[ic][ib][ih]),expr*bincut*weight)
                 break
 
@@ -234,6 +267,8 @@ def makePassFailHistograms( configs, njob, ijob ):
     ################ FIXME mig test ###################
     mighist_pass.Write()
     mighist_fail.Write()
+    mighist_pass_mod.Write()
+    mighist_fail_mod.Write()
     ##################################################
     print(len([h for hhh in hists for hh in hhh for h in hh]))
     for hist in [h for hhh in hists for hh in hhh for h in hh]:
