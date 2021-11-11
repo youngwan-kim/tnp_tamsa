@@ -1,6 +1,7 @@
-import os,sys,copy
+import os,sys,copy,math
+import numpy
 import ROOT
-from efficiencyUtils import Efficiency,ScaleFactor,EfficiencyHist
+from efficiencyUtils import Efficiency,ScaleFactor,EfficiencyHist,ScaleFactorHist
 def Setup():
     ROOT.TH1.SetDefaultSumw2(True)
     ROOT.gStyle.SetCanvasDefH(600)
@@ -12,6 +13,13 @@ def Setup():
     ROOT.gStyle.SetTitleFontSize(0)
     ROOT.TGaxis.SetExponentOffset(-0.06,0)
     return
+
+def GetHist(filename,histname):
+    f=ROOT.TFile(filename)
+    h=f.Get(histname)
+    h.SetDirectory(0)
+    h.SetStats(0)
+    return h
 
 def GetAxisParent(pad=None):
     if pad is None: pad=ROOT.gPad
@@ -161,8 +169,8 @@ def Find(lobj,name=None,title=None,classname=None):
         return obj
     return None
 
-def SavePlotSystematicPt(args=None,**kwargs):
-    c=ROOT.TCanvas("c")
+def GetSystematicPlot(filename,axis="x",ibin=None,ymin=None):
+    c=ROOT.TCanvas()
     c.Divide(1,4)
     c.GetPad(1).SetPad(0,0.12+0.26*2,1,1)
     c.GetPad(1).SetTopMargin(0.1/(0.1+0.26))
@@ -182,10 +190,14 @@ def SavePlotSystematicPt(args=None,**kwargs):
     for i in range(1,4):
         hists=[]
         c.cd(i)
-        ROOT.gPad.SetLogx()
-        this_args=ParseArgs(args.clone(type=types[i-1]))
-        h=GetEfficiencyHist(this_args).ProjectionY()
+        effhist=EfficiencyHist(filename+":"+types[i-1])
+        if axis=="x":
+            h=effhist.ProjectionX(ibin,ibin)
+        elif axis=="y":
+            h=effhist.ProjectionY(ibin,ibin)
         norm=h.MakeTH(stat=False,syst=False)
+        if 2*norm.GetBinWidth(norm.GetXaxis().GetFirst())<norm.GetBinWidth(norm.GetXaxis().GetLast()):
+            ROOT.gPad.SetLogx()
 
         hist=h.MakeTH()
         hist.SetFillStyle(3003)
@@ -205,35 +217,28 @@ def SavePlotSystematicPt(args=None,**kwargs):
         
         for hist in hists:
             hist.Divide(norm)
-            for ibin in range(hist.GetNcells()):
-                val=hist.GetBinContent(ibin)
+            for ib in range(hist.GetNcells()):
+                val=hist.GetBinContent(ib)
                 if val!=0:
-                    hist.SetBinContent(ibin,val-1)
+                    hist.SetBinContent(ib,val-1)
             draw=False
-            for ibin in range(hist.GetNcells()):
-                if hist.GetBinContent(ibin)!=0. or hist.GetBinError(ibin)!=0.:
+            for ib in range(hist.GetNcells()):
+                if hist.GetBinContent(ib)!=0. or hist.GetBinError(ib)!=0.:
                     draw=True
                     break
             if not draw: continue
 
             if GetAxisParent():
-                hist.GetXaxis().SetRangeUser(this_args.ptmin,hist.GetXaxis().GetXmax())
                 hist.Draw("same")
             else:
                 hist.SetStats(0)
                 hist.SetTitle("")
-                hist.GetXaxis().SetRangeUser(this_args.ptmin,hist.GetXaxis().GetXmax())
                 hist.GetXaxis().SetMoreLogLabels()
                 hist.SetTitleSize(0.04/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"X")
                 hist.SetLabelSize(0.04/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"X")
                 hist.SetTitleSize(0.03/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"Y")
                 hist.SetLabelSize(0.03/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"Y")
                 hist.SetTitleOffset(1.8*min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"Y")
-                hist.GetYaxis().SetRangeUser(-0.059,+0.059)
-                if hasattr(args,"trigger") and args.trigger not in ["",None]:
-                    hist.GetYaxis().SetRangeUser(-0.019,+0.019)
-                if args.channel=="Muon":
-                    hist.GetYaxis().SetRangeUser(-0.019,+0.019)
                 hist.GetYaxis().SetNdivisions(505)
                 hist.GetYaxis().SetTickLength(0.01)
                 hist.Draw()
@@ -242,60 +247,243 @@ def SavePlotSystematicPt(args=None,**kwargs):
     GetAxisParent(c.GetPad(1)).GetYaxis().SetTitle("#varepsilon_{data} Rel. Unc. ")
     GetAxisParent(c.GetPad(2)).GetYaxis().SetTitle("#varepsilon_{sim} Rel. Unc. ")
     GetAxisParent(c.GetPad(3)).GetYaxis().SetTitle("SF Rel. Unc. ")
-
     c.cd(4)
-    DrawPreliminary(args)
     latex=ROOT.TLatex()
     latex.SetTextSize(0.03)
-    latex.SetNDC()
     latex.SetTextAlign(33)
-    if hasattr(args,"trigger") and args.trigger not in ["",None]:
-        latex.DrawText(0.89,0.63,args.trigger)
-    latex.DrawText(0.89,0.60,args.id)
-    if args.charge=="Plus":
-        latex.DrawText(0.89,0.57,"Q > 0")
+    if ibin is not None:
+        if axis=="x":
+            latex.DrawLatex(0.89,0.89,"{:.1f} < {} < {:.1f}".format(effhist.hist.GetYaxis().GetBinLowEdge(ibin),effhist.hist.GetYaxis().GetTitle(),effhist.hist.GetYaxis().GetBinUpEdge(ibin)))
+        elif axis=="y":
+            latex.DrawLatex(0.89,0.89,"{:.1f} < {} < {:.1f}".format(effhist.hist.GetXaxis().GetBinLowEdge(ibin),effhist.hist.GetXaxis().GetTitle(),effhist.hist.GetXaxis().GetBinUpEdge(ibin)))
     else:
-        latex.DrawText(0.89,0.57,"Q < 0")
+        latex.DrawLatex(0.89,0.89,"Average")            
 
-    xtitle="e" if args.channel=="Electron" else "#mu"
-    xtitle+="^{+}" if args.charge=="Plus" else "^{-}"
-    xtitle+=" p_{T} [GeV]"
-    GetAxisParent(c.GetPad(3)).GetXaxis().SetTitle(xtitle)
-
-    leg=ROOT.TLegend(0.6,0.28,0.89,0.47)
+    leg=ROOT.TLegend(0.5,0.33,0.89,0.43)
+    leg.SetNColumns(2)
     leg.AddEntry(Find(hists,name="total"),"total unc.","f")
     leg.AddEntry(Find(hists,name="stat"),"stat. unc.","l")
-    if args.channel=="Electron":
-        leg.AddEntry(Find(hists,name="s1m0"),"Bkg. model","l")
-        leg.AddEntry(Find(hists,name="s2m0"),"Sig. model","l")
-        leg.AddEntry(Find(hists,name="s3m0"),"tag selection","l")
-        leg.AddEntry(Find(hists,name="s4m0"),"Alt. simulation","l")
-    if args.channel=="Muon":
-        leg.AddEntry(Find(hists,name="s1m0"),"mass window","l")
-        leg.AddEntry(Find(hists,name="s2m0"),"tag selection","l")
-        if Find(hists,name="s3m0"):
-            leg.AddEntry(Find(hists,name="s3m0"),"number of mass bin","l")
+    for i in range(1,20):
+        hist=Find(hists,name="s{}m0".format(i))
+        if not hist: break
+        title=hist.GetTitle()
+        leg.AddEntry(hist,title,"l")
     leg.Draw()
+    setattr(c,"legend",leg)
+
+    values=[]
+    for hists in histss:
+        h=Find(hists,name="total")
+        for i in range(h.GetNcells()):
+            if h.GetBinContent(i) or h.GetBinError(i):
+                values+=[abs(h.GetBinContent(i))+h.GetBinError(i)]
+    values=sorted(values)
+    #ymax=values[int((len(values)-1)*0.8)]*2
+    while numpy.mean(values)+3*numpy.std(values)<values[-1]:
+        values=values[:-1]
+    ymax=2*numpy.mean(values)
+    ymax=math.ceil(ymax*100)/100.-0.001
+    GetAxisParent(c.GetPad(1)).GetYaxis().SetRangeUser(-ymax,ymax)
+    GetAxisParent(c.GetPad(2)).GetYaxis().SetRangeUser(-ymax,ymax)
+    GetAxisParent(c.GetPad(3)).GetYaxis().SetRangeUser(-ymax,ymax)
 
     c.Update()
     c.Modified()
+    setattr(c,"hists",[h for hh in histss for h in hh])
+    return c
 
-    plotname=args.era_short()
-    if hasattr(args,"trigger") and args.trigger not in ["",None]:
-        plotname+="_"+args.trigger.replace("Leg1","").replace("Leg2","").lower()
-    plotname+="_medium" if "Medium" in args.id else "_tight"
-    plotname+="_"+args.charge.lower()
-    plotpath="/".join([args.home,"fig/syst",args.channel.lower(),plotname])
-    if not os.path.exists(os.path.dirname(plotpath)):
-        os.makedirs(os.path.dirname(plotpath))
-    c.SaveAs(plotpath+".pdf")
-    c.SaveAs(plotpath+".png")
-
-def SavePlotSystematicPtAll():
+def SaveSystematicPlots(filename):
     Setup()
-    largs=GetListOfArgs(types=[None])
-    for args in largs:
-        SavePlotSystematicPt(args)
+    tempbatch=ROOT.gROOT.IsBatch()
+    tempignorelevel=ROOT.gErrorIgnoreLevel
+    ROOT.gROOT.SetBatch(True)
+    ROOT.gErrorIgnoreLevel=ROOT.kWarning
+
+    h=EfficiencyHist(filename+":data").MakeTH()
+    if not h:
+        print "No data in "+filename
+        return
+    plotdir="/".join([os.path.dirname(filename),"plots/summary"])
+    if not os.path.exists(plotdir):
+        os.makedirs(plotdir)
+    for i in range(1,h.GetNbinsY()+1):
+        c=GetSystematicPlot(filename,axis="x",ibin=i)
+        c.SaveAs(plotdir+"/syst_x{}.pdf".format(i))
+        c.SaveAs(plotdir+"/syst_x{}.png".format(i))
+    c=GetSystematicPlot(filename,axis="x")
+    c.SaveAs(plotdir+"/syst_x.pdf".format(i))
+    c.SaveAs(plotdir+"/syst_x.png".format(i))
+        
+    for i in range(1,h.GetNbinsX()+1):
+        c=GetSystematicPlot(filename,axis="y",ibin=i)
+        c.SaveAs(plotdir+"/syst_y{}.pdf".format(i))
+        c.SaveAs(plotdir+"/syst_y{}.png".format(i))
+    c=GetSystematicPlot(filename,axis="y")
+    c.SaveAs(plotdir+"/syst_y.pdf".format(i))
+    c.SaveAs(plotdir+"/syst_y.png".format(i))
+    
+    ROOT.gROOT.SetBatch(tempbatch)
+    ROOT.gErrorIgnoreLevel=tempignorelevel
+    return
+
+def GetEfficiencyPlot(filename,axis="y",ibin=None):
+    ehdata2d=EfficiencyHist(filename+":data")
+    ehsim2d=EfficiencyHist(filename+":sim")
+
+    if type(ibin) is not list:
+        ibin=[ibin]
+
+    hists=[]
+    sfs=[]
+    colors=[1,2,3,4,6,7,8,9]
+    icolor=0
+    for i in ibin:
+        if axis=="x":
+            hdata=ehdata2d.ProjectionX(i,i).MakeTH()
+            hsim=ehsim2d.ProjectionX(i,i).MakeTH()
+            hsf=ScaleFactorHist(ehdata2d.ProjectionX(i,i),ehsim2d.ProjectionX(i,i)).MakeTH()
+        elif axis=="y":
+            hdata=ehdata2d.ProjectionY(i,i).MakeTH()
+            hsim=ehsim2d.ProjectionY(i,i).MakeTH()
+            hsf=ScaleFactorHist(ehdata2d.ProjectionY(i,i),ehsim2d.ProjectionY(i,i)).MakeTH()
+            
+        if i is None:
+            rangestring="average"
+            if len(ibin)>1:
+                hdata.SetLineWidth(2)
+                hsim.SetLineWidth(2)
+                hsf.SetLineWidth(2)
+        else:
+            if axis=="x":
+                rangestring="{:.1f} < {} < {:.1f}".format(ehdata2d.hist.GetYaxis().GetBinLowEdge(i),ehdata2d.hist.GetYaxis().GetTitle().replace(" [GeV]",""),ehdata2d.hist.GetYaxis().GetBinUpEdge(i))
+            elif axis=="y":
+                rangestring="{:.1f} < {} < {:.1f}".format(ehdata2d.hist.GetXaxis().GetBinLowEdge(i),ehdata2d.hist.GetXaxis().GetTitle().replace(" [GeV]",""),ehdata2d.hist.GetXaxis().GetBinUpEdge(i))
+        hdata.SetTitle("data "+rangestring)
+        hsim.SetTitle("sim "+rangestring)
+        hsf.SetTitle("sf "+rangestring)
+            
+        hdata.SetLineColor(colors[icolor])
+        hdata.SetMarkerColor(colors[icolor])
+        hdata.SetMarkerStyle(20)
+        hdata.SetMarkerSize(0.7)
+        hists+=[hdata]
+        
+        hsim.SetLineStyle(2)
+        hsim.SetLineColor(colors[icolor])
+        hsim.SetMarkerStyle(1)
+        hists+=[hsim]
+
+        hsf.SetLineColor(colors[icolor])
+        sfs+=[hsf]
+
+        icolor+=1
+
+    c=ROOT.TCanvas()
+    c.Divide(1,3)
+
+    c.cd(2)
+    ROOT.gPad.SetPad(0,0.35,1,1)
+    ROOT.gPad.SetFillStyle(0)
+    ROOT.gPad.SetBottomMargin(0.0)
+    ROOT.gPad.SetTopMargin(c.GetTopMargin()/0.65)
+    if 2*hdata.GetBinWidth(hdata.GetXaxis().GetFirst())<hdata.GetBinWidth(hdata.GetXaxis().GetLast()):
+        ROOT.gPad.SetLogx()
+    for hist in hists:
+        if GetAxisParent(): 
+            hist.Draw("same hist e")
+        else: 
+            hist.Draw("hist e")
+        
+    GetAxisParent().GetYaxis().SetTitle("Efficiency")
+    GetAxisParent().GetYaxis().SetRangeUser(0.11,1.04)
+    GetAxisParent().SetTitleSize(0.04/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"XYZ")
+    GetAxisParent().SetTitleOffset(2*min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"Y")
+    GetAxisParent().SetLabelSize(0.04/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"XYZ")
+
+    c.cd(3)
+    ROOT.gPad.SetPad(0,0,1,0.35)
+    ROOT.gPad.SetGridy()
+    ROOT.gPad.SetFillStyle(0)
+    ROOT.gPad.SetTopMargin(0.0)
+    ROOT.gPad.SetBottomMargin(c.GetBottomMargin()/0.35)
+    if 2*hdata.GetBinWidth(hdata.GetXaxis().GetFirst())<hdata.GetBinWidth(hdata.GetXaxis().GetLast()):
+        ROOT.gPad.SetLogx()
+    for hist in sfs:
+        if GetAxisParent(): 
+            hist.Draw("same hist e")
+        else:
+            hist.Draw("hist e")
+    GetAxisParent().SetTitle("")
+    GetAxisParent().GetXaxis().SetMoreLogLabels()
+    GetAxisParent().GetYaxis().SetRangeUser(0.81,1.19)
+    GetAxisParent().GetYaxis().SetNdivisions(205)
+    GetAxisParent().GetYaxis().SetTitle("SF")
+    GetAxisParent().SetTitleSize(0.04/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"XYZ")
+    GetAxisParent().SetTitleOffset(2*min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"Y")
+    GetAxisParent().SetTitleOffset(1.3*ROOT.gPad.GetWNDC(),"X")
+    GetAxisParent().SetLabelSize(0.04/min(ROOT.gPad.GetHNDC(),ROOT.gPad.GetWNDC()),"XYZ")
+
+    c.cd(1)
+    ROOT.gPad.SetPad(0,0,1,1)
+    ROOT.gPad.SetFillStyle(0)
+
+    leg=ROOT.TLegend(0.89,0.37,0.6,0.55)
+    leg.SetBorderSize(0)
+    for hist in hists:
+        leg.AddEntry(hist,"","l")
+    leg.Draw()
+    setattr(c,"legend",leg)
+    
+    GetAxisParent(c.GetPad(2)).SetTitle("")
+    c.Update()
+    c.Modified()
+    setattr(c,"hists",hists+sfs)
+
+    return c
+    
+def SaveEfficiencyPlots(filename):
+    Setup()
+    tempbatch=ROOT.gROOT.IsBatch()
+    tempignorelevel=ROOT.gErrorIgnoreLevel
+    ROOT.gROOT.SetBatch(True)
+    ROOT.gErrorIgnoreLevel=ROOT.kWarning
+
+    h=EfficiencyHist(filename+":data").MakeTH()
+    if not h:
+        print "No data in "+filename
+        return
+    plotdir="/".join([os.path.dirname(filename),"plots/summary"])
+    if not os.path.exists(plotdir):
+        os.makedirs(plotdir)
+    for i in range(1,h.GetNbinsY()+1):
+        c=GetEfficiencyPlot(filename,axis="x",ibin=i)
+        c.SaveAs(plotdir+"/eff_x{}.pdf".format(i))
+        c.SaveAs(plotdir+"/eff_x{}.png".format(i))
+    c=GetEfficiencyPlot(filename,axis="x")
+    c.SaveAs(plotdir+"/eff_x.pdf")
+    c.SaveAs(plotdir+"/eff_x.png")
+    c=GetEfficiencyPlot(filename,axis="x",ibin=[None,h.GetYaxis().FindBin(30),h.GetYaxis().FindBin(90)])
+    c.SaveAs(plotdir+"/eff_xx.pdf")
+    c.SaveAs(plotdir+"/eff_xx.png")
+        
+    for i in range(1,h.GetNbinsX()+1):
+        c=GetEfficiencyPlot(filename,axis="y",ibin=i)
+        c.SaveAs(plotdir+"/eff_y{}.pdf".format(i))
+        c.SaveAs(plotdir+"/eff_y{}.png".format(i))
+    c=GetEfficiencyPlot(filename,axis="y")
+    c.SaveAs(plotdir+"/eff_y.pdf")
+    c.SaveAs(plotdir+"/eff_y.png")
+    c=GetEfficiencyPlot(filename,axis="y",ibin=[None,h.GetXaxis().FindBin(0.0),h.GetXaxis().FindBin(2.39)])
+    c.SaveAs(plotdir+"/eff_yy.pdf")
+    c.SaveAs(plotdir+"/eff_yy.png")
+    
+    ROOT.gROOT.SetBatch(tempbatch)
+    ROOT.gErrorIgnoreLevel=tempignorelevel
+    return
+
+def SavePlots(filename):
+    SaveEfficiencyPlots(filename)
+    SaveSystematicPlots(filename)
     return
 
 def PrintEfficiency(path):
@@ -306,45 +494,7 @@ def PrintEfficiency(path):
     print sim.ProjectionY()
     print sf.ProjectionY()
     return
-
-def DrawSysLegend(c):
-    c.cd(2)
-    leg=ROOT.TLegend(0.65,0.85,0.89,0.97)
-    leg.SetNColumns(2)
-    leg.SetFillStyle(0)
-    leg.SetBorderSize(0)
-    leg.AddEntry(c.GetPad(2).GetPrimitive("simulation"),"stat.","f")
-    leg.AddEntry(c.GetPad(2).GetPrimitive("efficiencySF")," #oplus eff. unc.","f")
-    leg.Draw()
-    c.leg=leg
-    return c
-
-def SavePlotValidationAll():
-    outdir="validation"
-    if not os.path.exists(outdir): os.makedirs(outdir)
-    ROOT.gROOT.ProcessLine(".L {}/Plotter/EfficiencyPlotter.cc".format(os.getenv("SKFlat_WD")))
-    muplotter=ROOT.EfficiencyPlotter("data ^minnlo+tau_minnlo+wjets+vv+tttw+1.7*ss_minnlo")
-    elplotter=ROOT.EfficiencyPlotter("data ^minnlo+tau_minnlo+wjets+vv+tttw+ss_minnlo")
-    for channel in ["ee","el","mm","mu"]:
-        for era in ["2016a","2016b","2017"]:
-            if channel.startswith("e"):
-                c=DrawSysLegend(elplotter.DrawPlot("{}{}/m52to150/lpt".format(channel,era),"xmax:100 sysname:efficiencySF 1:ytitle:Events 2:ytitle:'data/Pred.' 2:xtitle:'electron p_{T} [GeV]' preliminary norm"))
-                c.SaveAs(outdir+"/{}{}_lpt.pdf".format(channel,era))
-                #raw_input()
-                c=DrawSysLegend(elplotter.DrawPlot("{}{}/m52to150/lsceta".format(channel,era),"sysname:efficiencySF xmin:-2.5 xmax:2.5 1:ytitle:Events 2:ytitle:'data/Pred.' 2:xtitle:'electron #eta_{SC}' preliminary norm noleg"))
-                c.SaveAs(outdir+"/{}{}_leta.pdf".format(channel,era))
-                #raw_input()
-            else:
-                c=DrawSysLegend(muplotter.DrawPlot("{}{}/m52to150/lpt".format(channel,era),"xmax:100 sysname:efficiencySF 1:ytitle:Events 2:ytitle:'data/Pred.' 2:xtitle:'muon p_{T} [GeV]' preliminary norm"))
-                c.SaveAs(outdir+"/{}{}_lpt.pdf".format(channel,era))
-                #raw_input()
-                c=DrawSysLegend(muplotter.DrawPlot("{}{}/m52to150/leta".format(channel,era),"sysname:efficiencySF 1:ytitle:Events 2:ytitle:'data/Pred.' 2:xtitle:'muon #eta' preliminary norm noleg"))
-                c.SaveAs(outdir+"/{}{}_leta.pdf".format(channel,era))
-                #raw_input()
-                         
     
 if __name__=="__main__":
-    #SavePlotSystematicPtAll()
-    #SavePlotValidationAll()
-    PrintEfficiency(sys.argv[1])
-
+    SavePlots(sys.argv[1])
+    exit()

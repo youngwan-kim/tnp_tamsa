@@ -313,6 +313,15 @@ if "sum" in args.step:
         h.Write()
     f.Close()
 
+    print '[Summary] Save plots'
+    from plotUtils import SavePlots
+    SavePlots(config.path+"/efficiency.root")
+
+    if "fix_ptbelow20" in config.option and config.tree=='tnpEleIDs/fitter_tree':
+        print '[Summary] post-process for "fix_ptbelow20"'
+        from PostProcess_fix_ptbelow20 import PostProcess_fix_ptbelow20
+        PostProcess_fix_ptbelow20(config.path+"/efficiency.root")
+        
 endTime=time.time()
 print 'Ends at ', time.strftime('%c',time.localtime(endTime))
 print 'Time took', endTime-startTime,'seconds.'

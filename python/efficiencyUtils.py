@@ -14,11 +14,13 @@ def make_combined_hist(hists,stat=True):
     ## s0m0 is nominal one with stat err.
     ## clone with name data_s0m0 -> data, sim_s0m0 -> sim, sf_s0m0 -> sf
     combined=hists[0][0].Clone(hists[0][0].GetName().split("_",1)[0])
+    combined.SetTitle("")
     combined.SetDirectory(0)
     if not stat:
         for ibin in range(combined.GetNcells()):
             combined.SetBinError(ibin,0.)
         combined.SetName(combined.GetName()+"_sys")
+        combined.SetTitle("sys")
     for members in hists:
         add_error_maxdiff(combined,members)
     return combined
@@ -78,6 +80,26 @@ class Efficiency(object):
 
     def clone(self):
         return copy.deepcopy(self)
+    
+    def __div__(self,other):
+        out=ScaleFactor(val=self.val,err=self.err)
+        if self.val==0 or other.val==0:
+            out.val=0.
+            for i in range(len(out.err)):
+                for j in range(len(out.err[i])):
+                    out.err[i][j]=0.
+        else:
+            out.val=self.val/other.val
+            for i in range(len(out.err)):
+                for j in range(len(out.err[i])):
+                    if i==0:
+                        out.err[i][j]=(self.val/other.val)*math.sqrt((self.err[i][j]/self.val)**2+(other.err[i][j]/other.val)**2)
+                    elif other.val+other.err[i][j]:
+                        out.err[i][j]=(self.val+self.err[i][j])/(other.val+other.err[i][j])-out.val
+                    else:
+                        out.err[i][j]=0.
+        return out
+        
         
 class ScaleFactor(Efficiency):
     def __add__(self,other):
@@ -100,13 +122,14 @@ class ScaleFactor(Efficiency):
     
 
 class EfficiencyHist:
-    def __init__(self,path=None,isSF=None,hist=None,bins=None):
+    def __init__(self,path=None,isSF=None,hist=None,bins=None,titles=None):
         self.hist=None
         self.bins=None
+        self.titles=None
         if path:
             self.InitWithFile(path,isSF)
         if hist and bins:
-            self.InitWithHistBins(hist,bins)
+            self.InitWithHistBins(hist,bins,titles)
         return
 
     def __str__(self):
@@ -115,10 +138,11 @@ class EfficiencyHist:
             out+=[b.__str__()]
         return "\n".join(out)
 
-    def InitWithHistBins(self,hist,bins):
+    def InitWithHistBins(self,hist,bins,titles):
         self.hist=hist.Clone()
         self.hist.SetDirectory(0)
         self.bins=copy.deepcopy(bins)
+        self.titles=titles
         return
         
     def InitWithFile(self,path,isSF=None):
@@ -137,6 +161,7 @@ class EfficiencyHist:
         self.hist=hists[0][0].Clone(histname)
         self.hist.Reset()
         self.hist.SetDirectory(0)
+        self.titles=[[h.GetTitle() for h in hh] for hh in hists]
             
         self.bins=[]
         for ibin in range(self.hist.GetNcells()):
@@ -203,7 +228,7 @@ class EfficiencyHist:
             for iy in range(iymin,iymax+1):
                 for iz in range(izmin,izmax+1):
                     bins[ix]+=self.bins[self.GetBin(ix,iy,iz)]
-        return EfficiencyHist(hist=hist,bins=bins)
+        return EfficiencyHist(hist=hist,bins=bins,titles=self.titles)
         
     def ProjectionY(self,ixmin=None,ixmax=None,izmin=None,izmax=None):
         if ixmin==None: ixmin=1
@@ -216,11 +241,12 @@ class EfficiencyHist:
             for iy in range(hist.GetNcells()):
                 for iz in range(izmin,izmax+1):
                     bins[iy]+=self.bins[self.GetBin(ix,iy,iz)]
-        return EfficiencyHist(hist=hist,bins=bins)
+        return EfficiencyHist(hist=hist,bins=bins,titles=self.titles)
         
     def MakeTH(self,stat=True,syst=True,iset=None,imem=None):
         hist=self.hist.Clone()
         hist.SetDirectory(0)
+        hist.SetStats(0)
         for i in range(hist.GetNcells()):
             val=self.GetBinContent(i)
             err=self.GetBinError(i,stat,syst,iset,imem)
@@ -229,4 +255,20 @@ class EfficiencyHist:
                 err=0
             hist.SetBinContent(i,val)
             hist.SetBinError(i,err)
+        if iset is not None and imem is not None:
+            hist.SetTitle(self.titles[iset][imem])
+        elif stat and syst:
+            hist.SetTitle("total unc.")
+        elif stat:
+            hist.SetTitle("stat. unc.")
+        elif syst:
+            hist.SetTitle("syst. unc.")
         return hist
+
+class ScaleFactorHist(EfficiencyHist):
+    def __init__(self,ehdata,ehsim):
+        self.hist=ehdata.hist.Clone()
+        self.titles=ehdata.titles
+        self.bins=[]
+        for ib in range(self.hist.GetNcells()):
+            self.bins+=[ehdata.bins[ib]/ehsim.bins[ib]]

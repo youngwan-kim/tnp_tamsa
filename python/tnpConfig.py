@@ -143,8 +143,8 @@ class tnpConfig(object):
             listOfVars = []
             for iv in  range(len(bins)):
                 listOfVars.append(bins[iv]['var'])
-
             self.vars=listOfVars
+            self.vartitles=[var['title'] if var.has_key("title") else var['var'] for var in bins]
             val=listOfBins
         super(tnpConfig,self).__setattr__(key,val)
         return
@@ -198,11 +198,19 @@ class tnpConfig(object):
         histname+="_"+self.name
         if ndim==1:
             hist=ROOT.TH1D(histname,self.title,len(bins[0])-1,array('f',bins[0]))
+            hist.GetXaxis().SetTitle(self.vartitles[0])
         elif ndim==2:
             hist=ROOT.TH2D(histname,self.title,len(bins[0])-1,array('f',bins[0]),len(bins[1])-1,array('f',bins[1]))
+            hist.GetXaxis().SetTitle(self.vartitles[0])
+            hist.GetYaxis().SetTitle(self.vartitles[1])
         elif ndim==3:
             hist=ROOT.TH3D(histname,self.title,len(bins[0])-1,array('f',bins[0]),len(bins[1])-1,array('f',bins[1]),len(bins[2])-1,array('f',bins[2]))
+            hist.GetXaxis().SetTitle(self.vartitles[0])
+            hist.GetYaxis().SetTitle(self.vartitles[1])
+            hist.GetZaxis().SetTitle(self.vartitles[2])
         hist.SetDirectory(0)
+        hist.SetStats(0)
+        hist.SetOption("colz text")
 
         for ibin in range(len(self.bins)):
             b=self.bins[ibin]

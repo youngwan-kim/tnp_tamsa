@@ -119,11 +119,15 @@ class tnpFitter(object):
             ## fit errors should be scaled. See comment on fitTo function.
             if histPass.GetEffectiveEntries(): 
                 fit_errp*=(histPass.Integral()/histPass.GetEffectiveEntries())**0.5
+                ## prevent from unreasonably small error
+                fit_errp=max(fit_errp,fit_valp/histPass.GetEffectiveEntries()**0.5)
             fit_valf=work.var("nSigF").getVal()
             fit_errf=work.var("nSigF").getError()
             ## fit errors should be scaled. See comment on fitTo function.
             if histFail.GetEffectiveEntries(): 
                 fit_errf*=(histFail.Integral()/histFail.GetEffectiveEntries())**0.5
+                ## prevent from unreasonably small error
+                fit_errf=max(fit_errf,fit_valf/histFail.GetEffectiveEntries()**0.5)
             fit_eff,fit_err=calc_eff(fit_valp,fit_valf,fit_errp,fit_errf)
             text1.AddText("fit_eff[{},{}] = {:.4f} #pm {:.4f}".format(config.fit_range[0],config.fit_range[1],fit_eff,fit_err))
             if hasattr(config,"count_range") and getattr(config,"count_range"):
